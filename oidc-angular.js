@@ -239,6 +239,7 @@
                         delete $localStorage['refreshRunning'];
                     }
                     if (window === window.parent && config.advanceRefresh) {
+                        validateExpirity();
                         $timeout(function(){
                             validateExpirityLoop();
                         }, config.advanceRefresh*1000);
@@ -430,8 +431,6 @@
                 };
 
                 var validateExpirity = function () {
-                    if (tokenService.hasValidToken()) return;
-
                     var now = Date.now();
 
                     if (!tokenService.hasValidToken() || !tokenIsValidAt(now + config.advanceRefresh)) {
