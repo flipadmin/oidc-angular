@@ -17,7 +17,7 @@
     var silentRefreshFailedEvent = eventPrefix + 'silentRefreshFailed';
     var silentRefreshTimeoutEvent = eventPrefix + 'silentRefreshTimeout';
 
-// Module registrarion
+    // Module registrarion
     var oidcmodule = angular.module('oidc-angular', ['base64', 'ngStorage', 'ngRoute']);
 
     oidcmodule.config(['$httpProvider', '$routeProvider', function ($httpProvider, $routeProvider) {
@@ -239,10 +239,7 @@
                         delete $localStorage['refreshRunning'];
                     }
                     if (window === window.parent && config.advanceRefresh) {
-                        validateExpirity();
-                        $timeout(function(){
-                            validateExpirityLoop();
-                        }, config.advanceRefresh*1000);
+                        validateExpirityLoop();
                     }
                 };
 
@@ -425,6 +422,10 @@
                 var tokenIsValidAt = function (date) {
                     var claims = tokenService.allClaims();
 
+                    if (!claims || !(claims.hasOwnProperty('exp'))) {
+                        return false;
+                    }
+
                     var expiresAtMSec = claims.exp * 1000;
 
                     return date <= expiresAtMSec;
@@ -433,7 +434,7 @@
                 var validateExpirity = function () {
                     var now = Date.now();
 
-                    if (!tokenService.hasValidToken() || !tokenIsValidAt(now + config.advanceRefresh)) {
+                    if (!tokenService.hasValidToken() || !tokenIsValidAt(now + config.advanceRefresh*1000)) {
                         $rootScope.$broadcast(tokenExpiresSoonEvent);
                         trySilentRefresh();
                     }
