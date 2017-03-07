@@ -239,6 +239,7 @@
                         delete $localStorage['refreshRunning'];
                     }
                     if (window === window.parent && config.advanceRefresh) {
+                        console.error('[ERROR]', 'You should not see me during REFRESHING!');
                         validateExpirityLoop();
                     }
                 };
