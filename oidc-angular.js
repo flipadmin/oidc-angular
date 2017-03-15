@@ -21,25 +21,26 @@
     // Module registrarion
     var oidcmodule = angular.module('oidc-angular', ['base64', 'ngStorage', 'ngRoute']);
 
-    oidcmodule.config(['$httpProvider', '$routeProvider', function ($httpProvider, $routeProvider) {
-        $httpProvider.interceptors.push('oidcHttpInterceptor');
+    oidcmodule.config(['$httpProvider', '$stateProvider', function ($httpProvider, $stateProvider) {
+      $httpProvider.interceptors.push('oidcHttpInterceptor');
 
-        // Register callback route
-        $routeProvider.when('/auth/callback/:data', {
-            template: '',
-            controller: ['$auth', '$routeParams', function ($auth, $routeParams) {
-                console.debug('oidc-angular: handling login-callback');
-                $auth.handleSignInCallback($routeParams.data);
-            }]
-        }).when('/auth/clear', {
-            template: '',
-            controller: ['$auth', function ($auth) {
-                console.debug('oidc-angular: handling logout-callback');
-                $auth.handleSignOutCallback();
-            }]
-        });
+      // Register callback route
+      $stateProvider.state('auth-callback', {
+        url: '/auth/callback/:data',
+        template: '',
+        controller: ['$auth', '$stateParams', function ($auth, $stateParams) {
+          console.debug('oidc-angular: handling login-callback');
+          $auth.handleSignInCallback($stateParams.data);
+        }]
+      }).state('auth-clear', {
+        template: '/auth/clear',
+        controller: ['$auth', function ($auth) {
+          console.debug('oidc-angular: handling logout-callback');
+          $auth.handleSignOutCallback();
+        }]
+      });
 
-        console.debug('oidc-angular: callback routes registered.')
+      console.debug('oidc-angular: callback routes registered.')
     }]);
 
     oidcmodule.factory('oidcHttpInterceptor', ['$rootScope', '$q', '$auth', 'tokenService', function ($rootScope, $q, $auth, tokenService) {
@@ -59,10 +60,12 @@
                             }
                             else {
                                 $rootScope.$broadcast(tokenExpiredEvent, {request: request});
+                                console.error(tokenExpiredEvent, {request: request});
                             }
                         }
                         else {
                             $rootScope.$broadcast(tokenMissingEvent, {request: request});
+                            console.error(tokenMissingEvent, {request: request});
                         }
                     }
                     else {
@@ -80,27 +83,30 @@
             },
 
             'response': function (response) {
-                // Proactively check if the token will expire soon
-                $auth.validateExpirity();
-
                 return response;
             },
 
             'responseError': function (response) {
 
-                if (response.status == 401) {
+                if (response.config.url.startsWith($auth.config.apiUrl)) {
+
+                  if (response.status == 401) {
                     if (!tokenService.hasToken()) {
-                        // There was probably no token attached, because there is none
-                        $rootScope.$broadcast(tokenMissingEvent, {response: response});
+                      // There was probably no token attached, because there is none
+                      $rootScope.$broadcast(tokenMissingEvent, {response: response});
+                      console.error(tokenMissingEvent, {response: response});
                     }
                     else if (!tokenService.hasValidToken()) {
-                        // Seems the token is not valid anymore
-                        $rootScope.$broadcast(tokenExpiredEvent, {response: response});
+                      // Seems the token is not valid anymore
+                      $rootScope.$broadcast(tokenExpiredEvent, {response: response});
+                      console.error(tokenExpiredEvent, {response: response});
                     }
                     else {
-                        // any other
-                        $rootScope.$broadcast(unauthorizedEvent, {response: response});
+                      // any other
+                      $rootScope.$broadcast(unauthorizedEvent, {response: response});
+                      console.error(unauthorizedEvent, {response: response});
                     }
+                  }
                 }
 
                 return $q.reject(response);
@@ -246,6 +252,7 @@
                         if (tokenService.hasToken()) {
                             if (!tokenService.hasValidToken()) {
                                 $rootScope.$broadcast(silentInitRefreshStartedEvent);
+                                console.log(silentInitRefreshStartedEvent);
                                 trySilentRefresh();
                             } else {
                                 validateExpirityLoop();
@@ -340,7 +347,6 @@
                 };
 
                 var handleImplicitFlowCallback = function (id_token) {
-
                     tokenService.saveToken(id_token);
 
                     var localRedirect = $localStorage['localRedirect'];
@@ -358,6 +364,7 @@
                     }
 
                     $rootScope.$broadcast(loggedInEvent);
+                    console.log(loggedInEvent);
                     return true;
                 };
 
@@ -365,17 +372,20 @@
                     var currentClaims = tokenService.allClaims();
                     var event;
                     var newClaims = tokenService.convertToClaims(newIdToken);
+                    var logHandler = console.log;
 
                     if (!currentClaims || (currentClaims.exp && newClaims.exp && newClaims.exp > currentClaims.exp)) {
-                        tokenService.saveToken(newIdToken, newIdToken);
+                        tokenService.saveToken(newIdToken);
                         event = silentRefreshSuceededEvent;
                     }
                     else {
                         event = silentRefreshFailedEvent;
+                        logHandler = console.error;
                     }
                     $localStorage['refreshRunning'] = false;
                     $localStorage.$apply();
                     $rootScope.$broadcast(event);
+                    logHandler(event);
                 };
 
                 var trySilentRefresh = function () {
@@ -389,6 +399,7 @@
 
                     $timeout(function () {
                         $rootScope.$broadcast(silentRefreshStartedEvent);
+                        console.log(silentRefreshStartedEvent);
 
                         var url = createLoginUrl('dummynonce', 'refresh');
 
@@ -400,12 +411,12 @@
                             if ($localStorage['refreshRunning']) {
                                 delete $localStorage['refreshRunning'];
                                 $rootScope.$broadcast(silentRefreshTimeoutEvent);
+                                console.error(silentRefreshTimeoutEvent);
                             }
-
+                            elem.remove();
                             if (tokenService.hasValidToken()) {
                                 validateExpirityLoop();
                             }
-                            $document.find("#oauthFrame").remove();
                         }, 30000);
                     });
 
@@ -447,9 +458,11 @@
                     delete $localStorage['validateExpirityLoopRunning'];
 
                     tokenService.clearTokens();
+                    $localStorage.$apply();
                     $location.path('/');
 
                     $rootScope.$broadcast(loggedOutEvent);
+                    console.log(loggedOutEvent);
                 };
 
                 var tokenIsValidAt = function (date) {
@@ -469,6 +482,7 @@
 
                     if (!tokenService.hasValidToken() || !tokenIsValidAt(now + config.advanceRefresh*1000)) {
                         $rootScope.$broadcast(tokenExpiresSoonEvent);
+                        console.warn(tokenExpiresSoonEvent);
                         trySilentRefresh();
                     }
                 };
