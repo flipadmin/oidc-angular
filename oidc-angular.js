@@ -480,7 +480,7 @@
 
                     let idToken = tokenService.getIdToken();
 
-                    return targetUrl + config.endSessionEndpoint
+                    return targetUrl
                         + "?id_token_hint="
                         + encodeURIComponent(idToken)
                         + "&post_logout_redirect_uri="
