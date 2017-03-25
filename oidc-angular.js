@@ -2,55 +2,77 @@
 
 (function () {
 
-    var eventPrefix = 'oidcauth:';
+    let eventPrefix = 'oidcauth:';
 
-    var unauthorizedEvent = eventPrefix + 'unauthorized';
-    var tokenExpiredEvent = eventPrefix + 'tokenExpired';
-    var tokenMissingEvent = eventPrefix + 'tokenMissing';
-    var tokenExpiresSoonEvent = eventPrefix + 'tokenExpires';
+    let unauthorizedEvent = eventPrefix + 'unauthorized';
+    let tokenExpiredEvent = eventPrefix + 'tokenExpired';
+    let tokenMissingEvent = eventPrefix + 'tokenMissing';
+    let tokenExpiresSoonEvent = eventPrefix + 'tokenExpires';
 
-    var loggedInEvent = eventPrefix + 'loggedIn';
-    var loggedOutEvent = eventPrefix + 'loggedOut';
+    let loggedInEvent = eventPrefix + 'loggedIn';
+    let loggedOutEvent = eventPrefix + 'loggedOut';
 
-    var silentRefreshStartedEvent = eventPrefix + 'silentRefreshStarted';
-    var silentInitRefreshStartedEvent = eventPrefix + 'silentInitRefreshStarted';
-    var silentRefreshSuceededEvent = eventPrefix + 'silentRefreshSucceded';
-    var silentRefreshFailedEvent = eventPrefix + 'silentRefreshFailed';
-    var silentRefreshTimeoutEvent = eventPrefix + 'silentRefreshTimeout';
+    let silentRefreshStartedEvent = eventPrefix + 'silentRefreshStarted';
+    let silentInitRefreshStartedEvent = eventPrefix + 'silentInitRefreshStarted';
+    let silentRefreshSuceededEvent = eventPrefix + 'silentRefreshSucceded';
+    let silentRefreshFailedEvent = eventPrefix + 'silentRefreshFailed';
+
+    let logger = {
+        name: '[oidcauth]',
+        make_log: function(handler, arg) {
+            handler(...[logger.name, ...arg])
+        },
+        info: function(...args){
+            logger.make_log(console.info, args)
+        },
+        debug: function(...args){
+            logger.make_log(console.debug, args)
+        },
+        error: function(...args){
+            logger.make_log(console.error, args)
+        },
+        warn: function(...args){
+            logger.make_log(console.warn, args)
+        },
+        log: function(...args){
+            logger.make_log(console.info, args)
+        }
+    };
 
     // Module registrarion
-    var oidcmodule = angular.module('oidc-angular', ['base64', 'ngStorage', 'ngRoute']);
+    let oidcmodule = angular.module('oidc-angular', ['base64', 'ngStorage', 'ui.router', 'angular-encryption']);
 
     oidcmodule.config(['$httpProvider', '$stateProvider', function ($httpProvider, $stateProvider) {
-      $httpProvider.interceptors.push('oidcHttpInterceptor');
+        $httpProvider.interceptors.push('oidcHttpInterceptor');
 
-      // Register callback route
-      $stateProvider.state('auth-callback', {
-        url: '/auth/callback/:data',
-        template: '',
-        controller: ['$auth', '$stateParams', function ($auth, $stateParams) {
-          console.debug('oidc-angular: handling login-callback');
-          $auth.handleSignInCallback($stateParams.data);
-        }]
-      }).state('auth-clear', {
-        template: '/auth/clear',
-        controller: ['$auth', function ($auth) {
-          console.debug('oidc-angular: handling logout-callback');
-          $auth.handleSignOutCallback();
-        }]
-      });
+        // Register callback route
+        $stateProvider.state('auth-callback', {
+            url: '/auth/callback/?code&state',
+            template: '',
+            controller: ['$auth', '$stateParams', function ($auth, $stateParams) {
+                logger.info('handling login-callback');
+                $auth.handleSignInCallback($stateParams);
+            }]
+        }).state('auth-clear', {
+            url: '/auth/clear',
+            template: '',
+            controller: ['$auth', function ($auth) {
+                logger.info('handling logout-callback');
+                $auth.handleSignOutCallback();
+            }]
+        });
 
-      console.debug('oidc-angular: callback routes registered.')
+        logger.info('callback routes registered.')
     }]);
 
-    oidcmodule.factory('oidcHttpInterceptor', ['$rootScope', '$q', '$auth', 'tokenService', function ($rootScope, $q, $auth, tokenService) {
+    oidcmodule.factory('oidcHttpInterceptor', ['$rootScope', '$q', '$injector', 'tokenService', function ($rootScope, $q, $injector, tokenService) {
         return {
 
             'request': function (request) {
+                const $auth = $injector.get('$auth');
+                if ($auth.config.apiUrl.test(request.url)) {
 
-                if (request.url.startsWith($auth.config.apiUrl)) {
-
-                    var appendBearer = false;
+                    let appendBearer = false;
 
                     if ($auth.config.enableRequestChecks) {
                         // Only append token when it's valid.
@@ -60,12 +82,12 @@
                             }
                             else {
                                 $rootScope.$broadcast(tokenExpiredEvent, {request: request});
-                                console.error(tokenExpiredEvent, {request: request});
+                                logger.error(tokenExpiredEvent, {request: request});
                             }
                         }
                         else {
                             $rootScope.$broadcast(tokenMissingEvent, {request: request});
-                            console.error(tokenMissingEvent, {request: request});
+                            logger.error(tokenMissingEvent, {request: request});
                         }
                     }
                     else {
@@ -73,7 +95,7 @@
                     }
 
                     if (appendBearer) {
-                        var token = tokenService.getIdToken();
+                        let token = tokenService.getIdToken();
                         request.headers['Authorization'] = 'Bearer ' + token;
                     }
                 }
@@ -87,26 +109,26 @@
             },
 
             'responseError': function (response) {
+                const $auth = $injector.get('$auth');
+                if ($auth.config.apiUrl.test(response.config.url)) {
 
-                if (response.config.url.startsWith($auth.config.apiUrl)) {
-
-                  if (response.status == 401) {
-                    if (!tokenService.hasToken()) {
-                      // There was probably no token attached, because there is none
-                      $rootScope.$broadcast(tokenMissingEvent, {response: response});
-                      console.error(tokenMissingEvent, {response: response});
+                    if (response.status == 401) {
+                        if (!tokenService.hasToken()) {
+                            // There was probably no token attached, because there is none
+                            $rootScope.$broadcast(tokenMissingEvent, {response: response});
+                            logger.error(tokenMissingEvent, {response: response});
+                        }
+                        else if (!tokenService.hasValidToken()) {
+                            // Seems the token is not valid anymore
+                            $rootScope.$broadcast(tokenExpiredEvent, {response: response});
+                            logger.error(tokenExpiredEvent, {response: response});
+                        }
+                        else {
+                            // any other
+                            $rootScope.$broadcast(unauthorizedEvent, {response: response});
+                            logger.error(unauthorizedEvent, {response: response});
+                        }
                     }
-                    else if (!tokenService.hasValidToken()) {
-                      // Seems the token is not valid anymore
-                      $rootScope.$broadcast(tokenExpiredEvent, {response: response});
-                      console.error(tokenExpiredEvent, {response: response});
-                    }
-                    else {
-                      // any other
-                      $rootScope.$broadcast(unauthorizedEvent, {response: response});
-                      console.error(unauthorizedEvent, {response: response});
-                    }
-                  }
                 }
 
                 return $q.reject(response);
@@ -116,9 +138,14 @@
 
     oidcmodule.service('tokenService', ['$base64', '$localStorage', function ($base64, $localStorage) {
 
-        var service = this;
+        const service = this;
+        const STORAGE_KEYS = {
+            idToken: 'oidc:token:idToken',
+            refreshToken: 'oidc:token:refreshToken',
+            claims: 'oidc:token:claims'
+        };
 
-        var padBase64 = function (base64data) {
+        const padBase64 = function (base64data) {
             while (base64data.length % 4 !== 0) {
                 base64data += "=";
             }
@@ -126,51 +153,79 @@
         };
 
         service.getPayloadFromRawToken = function (raw) {
-            var tokenParts = raw.split(".");
+            let tokenParts = raw.split(".");
+            if (tokenParts.length != 3) {
+                logger.error('Raw token does NOT have valid format.', raw)
+            }
             return tokenParts[1];
         };
 
         service.deserializeClaims = function (raw) {
-            var claimsBase64 = padBase64(raw);
-            var claimsJson = $base64.decode(claimsBase64);
+            try {
+                let claimsBase64 = padBase64(raw);
+                let claimsJson = $base64.decode(claimsBase64);
 
-            return JSON.parse(claimsJson);
+                return JSON.parse(claimsJson);
+            } catch (e) {
+                logger.error(e);
+                return {}
+            }
         };
 
         service.convertToClaims = function (id_token) {
-            var payload = service.getPayloadFromRawToken(id_token);
+            let payload = service.getPayloadFromRawToken(id_token);
             return service.deserializeClaims(payload);
         };
 
-        service.saveToken = function (id_token) {
+        service.getIdToken = function () {
+            return $localStorage[STORAGE_KEYS.idToken];
+        };
+        service.getRefreshToken = function () {
+            return $localStorage[STORAGE_KEYS.refreshToken];
+        };
+
+        service.saveIdToken = function (id_token) {
+            $localStorage[STORAGE_KEYS.idToken] = id_token;
+        };
+
+        service.saveRefreshToken = function (refresh_token) {
+            $localStorage[STORAGE_KEYS.refreshToken] = refresh_token;
+        };
+
+        service.saveTokens = function (id_token, refresh_token) {
             service.clearTokens();
-            $localStorage['idToken'] = id_token;
-            $localStorage.$apply();
+            service.saveIdToken(id_token);
+            service.saveRefreshToken(refresh_token);
         };
 
         service.hasToken = function () {
-            var claims = service.allClaims();
+            let claims = service.allClaims();
             return claims && claims.hasOwnProperty("iat") && claims.hasOwnProperty('exp');
         };
 
         service.hasValidToken = function () {
             if (!this.hasToken()) return false;
 
-            var claims = service.allClaims();
+            let claims = service.allClaims();
+            if (!claims.hasOwnProperty('iat') || !claims.hasOwnProperty('exp')) {
+                logger.error('Token claims does NOT have valid fields.', claims);
+                return false
+            }
 
-            var now = Date.now();
-            var issuedAtMSec = claims.iat * 1000;
-            var expiresAtMSec = claims.exp * 1000;
-            var marginMSec = 1000 * 60 * 5; // 5 Minutes
+            let now = Date.now();
+            //noinspection JSUnresolvedVariable
+            let issuedAtMSec = claims.iat * 1000;
+            let expiresAtMSec = claims.exp * 1000;
+            let marginMSec = 1000 * 60 * 5; // 5 Minutes
 
             // Substract margin, because browser time could be a bit in the past
             if (issuedAtMSec - marginMSec > now) {
-                console.log('oidc-connect: Token is not yet valid!');
+                logger.log('Token is not yet valid!');
                 return false
             }
 
             if (expiresAtMSec < now) {
-                console.log('oidc-connect: Token has expired!');
+                logger.log('Token has expired!');
                 return false;
             }
 
@@ -178,48 +233,59 @@
         };
 
         service.allClaims = function () {
-            var cachedClaims = $localStorage['cached-claims'];
+            let cachedClaims = $localStorage[STORAGE_KEYS.claims];
 
             if (!cachedClaims) {
-                var id_token = service.getIdToken();
+                let id_token = service.getIdToken();
 
                 if (id_token) {
                     cachedClaims = service.convertToClaims(id_token);
-                    $localStorage['cached-claims'] = cachedClaims;
+                    $localStorage[STORAGE_KEYS.claims] = cachedClaims;
                 }
             }
             return cachedClaims;
         };
 
-        service.getIdToken = function () {
-            if ($localStorage['refreshRunning']) {
-                $localStorage.$sync();
-            }
-            return $localStorage['idToken'];
-        };
-
         service.clearTokens = function () {
-            $localStorage['cached-claims'] = false;
-            $localStorage['idToken'] = false;
+            delete $localStorage[STORAGE_KEYS.claims];
+            delete $localStorage[STORAGE_KEYS.idToken];
+            delete $localStorage[STORAGE_KEYS.refreshToken];
         }
     }]);
 
     //noinspection JSUnusedLocalSymbols
-    oidcmodule.provider("$auth", ['$routeProvider', function ($routeProvider) {
+    oidcmodule.provider("$auth", [function() {
+        const STORAGE_KEYS = {
+            logoutActive: 'oidc:auth:logoutActive',
+            refreshRunning: 'oidc:auth:refreshRunning',
+            validateExpiryLoopRunning: 'oidc:auth:validateExpiryLoopRunning',
+            localRedirect: 'oidc:auth:localRedirect',
+            state: 'oidc:auth:state',
+            nonce: 'oidc:auth:nonce',
+            code_challenge: 'oidc:auth:code_challenge'
+        };
+
+        const getRandomString = (len) => {
+            const arr = new Uint8Array(Math.floor((len || 40) / 2));
+            //noinspection JSUnresolvedFunction
+            window.crypto.getRandomValues(arr);
+            const result = Array.from(arr).map(dec2hex).join('');
+            logger.debug('[getRandomString]', result);
+            return result;
+        };
 
         // Default configuration
-        var config = {
-            basePath: null,
-            clientId: null,
+        let config = {
+            basePath: '',
+            clientId: '',
             apiUrl: '/api/',
-            responseType: 'id_token',
-            scope: "openid profile",
+            responseType: 'code',
+            scope: "openid",
             redirectUri: (window.location.origin || window.location.protocol + '//' + window.location.host) + window.location.pathname + '#/auth/callback/',
             logoutUri: (window.location.origin || window.location.protocol + '//' + window.location.host) + window.location.pathname + '#/auth/clear',
-            state: "",
             authorizationEndpoint: 'connect/authorize',
-            revocationEndpoint: 'connect/revocation',
             endSessionEndpoint: 'connect/endsession',
+            tokenEndpoint: 'connect/token',
             advanceRefresh: 300,
             enableRequestChecks: false,
             stickToLastKnownIdp: false
@@ -230,76 +296,136 @@
             // Service configuration
             configure: function (params) {
                 angular.extend(config, params);
+                if (typeof config.apiUrl == 'string') {
+                    config.apiUrl = new RegExp(config.apiUrl);
+                }
             },
 
             // Service itself
-            $get: ['$timeout', '$q', '$document', '$rootScope', '$localStorage', '$location', 'tokenService', function ($timeout, $q, $document, $rootScope, $localStorage, $location, tokenService) {
+            $get: ['$http', '$timeout', '$rootScope', '$localStorage', '$location', 'tokenService', 'sha256', '$httpParamSerializer', '$base64', function (
+                    $http,   $timeout,   $rootScope,   $localStorage,   $location,   tokenService,   sha256,   $httpParamSerializer,   $base64) {
 
-                var init = function () {
+                const setLogoutActiveFlag = () => $localStorage[STORAGE_KEYS.logoutActive] = true;
+                const clearLogoutActiveFlag = () => delete $localStorage[STORAGE_KEYS.logoutActive];
+                const isLogoutActiveFlag = () => $localStorage[STORAGE_KEYS.logoutActive];
 
-                    if ($localStorage['logoutActive']) {
-                        delete $localStorage['logoutActive'];
+                const setRefreshRunningFlag = () => $localStorage[STORAGE_KEYS.refreshRunning] = true;
+                const clearRefreshRunningFlag = () => delete $localStorage[STORAGE_KEYS.refreshRunning];
+                const isRefreshRunningFlag = () => $localStorage[STORAGE_KEYS.refreshRunning];
+
+                const setExpiryLoopRunningFlag = () => $localStorage[STORAGE_KEYS.validateExpiryLoopRunning] = true;
+                const clearExpiryLoopRunningFlag = () => delete $localStorage[STORAGE_KEYS.validateExpiryLoopRunning];
+                const isExpiryLoopRunningFlag = () => $localStorage[STORAGE_KEYS.validateExpiryLoopRunning];
+
+                const getState = function(){
+                    if (!$localStorage[STORAGE_KEYS.state]) {
+                        $localStorage[STORAGE_KEYS.state] = getRandomString(17);
+                    }
+                    return $localStorage[STORAGE_KEYS.state];
+                };
+                const clearState = () => delete $localStorage[STORAGE_KEYS.state];
+
+                const getNonce = function(){
+                    if (!$localStorage[STORAGE_KEYS.nonce]) {
+                        $localStorage[STORAGE_KEYS.nonce] = getRandomString(17);
+                    }
+                    return $localStorage[STORAGE_KEYS.nonce];
+                };
+                const clearNonce = () => delete $localStorage[STORAGE_KEYS.nonce];
+
+                const getCodeChallenge = function() {
+                    if (!$localStorage[STORAGE_KEYS.code_challenge]){
+                        $localStorage[STORAGE_KEYS.code_challenge] = getRandomString(17);
+                    }
+                    return $localStorage[STORAGE_KEYS.code_challenge]
+                };
+                const getHashedCodeChallenge = () => {
+                    // const hashBytes = sha256.convertToSHA256(getCodeChallenge());
+                    // logger.log('[hashBytes]', hashBytes, hashBytes.match(/.{2}/g));
+                    // alert('d');
+                    //
+                    // return arrayBufferToBase64(hashBytes.match(/.{2}/g)).replace('=', '');
+                    return getCodeChallenge();
+                };
+
+                const getCodeChallengeMethod = () => 'plain'; //'S256';
+                const clearCodeChallenge = () => delete $localStorage[STORAGE_KEYS.code_challenge];
+
+                const setLocalRedirect = (url) => $localStorage[STORAGE_KEYS.localRedirect] = url;
+                const getLocalRedirect = () => $localStorage[STORAGE_KEYS.localRedirect];
+                const clearLocalRedirect = () => delete $localStorage[STORAGE_KEYS.localRedirect];
+
+
+                const init = function () {
+
+                    if (isLogoutActiveFlag()) {
+                        clearLogoutActiveFlag();
                         tokenService.clearTokens();
                     }
 
-                    if ($localStorage['refreshRunning']) {
-                        delete $localStorage['refreshRunning'];
+                    if (isRefreshRunningFlag()) {
+                        clearRefreshRunningFlag();
                     }
-                    if ($localStorage['validateExpirityLoopRunning']) {
-                        delete $localStorage['validateExpirityLoopRunning'];
+                    if (isExpiryLoopRunningFlag()) {
+                        clearExpiryLoopRunningFlag();
                     }
-                    if (window === window.parent && config.advanceRefresh) {
-                        if (tokenService.hasToken()) {
-                            if (!tokenService.hasValidToken()) {
-                                $rootScope.$broadcast(silentInitRefreshStartedEvent);
-                                console.log(silentInitRefreshStartedEvent);
-                                trySilentRefresh();
-                            } else {
-                                validateExpirityLoop();
-                            }
+                    if (tokenService.hasToken()) {
+                        if (tokenService.hasValidToken()) {
+                            validateExpiryLoop();
+                        } else {
+                            $rootScope.$broadcast(silentInitRefreshStartedEvent);
+                            logger.log(silentInitRefreshStartedEvent);
+                            trySilentRefresh();
                         }
                     }
                 };
 
-                var validateExpirityLoop = function(){
-                    if ($localStorage['validateExpirityLoopRunning']) {
+                const validateExpiryLoop = function () {
+                    if (isExpiryLoopRunningFlag()) {
                         return;
                     }
-                    $localStorage['validateExpirityLoopRunning'] = true;
-                    var f = function() {
-                        if (!$localStorage['validateExpirityLoopRunning']) {
+                    setExpiryLoopRunningFlag();
+                    logger.info('Starting validateExpiryLoop');
+                    let myLoop = function () {
+                        if (!isExpiryLoopRunningFlag()) {
+                            logger.info('Stopping validateExpiryLoop()');
                             return;
                         }
                         validateExpirity();
-                        $timeout(f, config.advanceRefresh*1000);
+                        $timeout(myLoop, config.advanceRefresh * 1000);
                     };
-                    f();
+                    myLoop();
                 };
 
-                var createLoginUrl = function (nonce, state) {
+                const createLoginUrl = function () {
+                    let targetUrl = '';
 
-                    var hasPathDelimiter = config.basePath.endsWith('/');
-                    var appendChar = (hasPathDelimiter) ? '' : '/';
-
-                    var currentClaims = tokenService.allClaims();
-                    if (currentClaims) {
-                        var idpClaimValue = currentClaims["idp"];
+                    if (!config.authorizationEndpoint.startsWith('http://') && !config.authorizationEndpoint.startsWith('https://')) {
+                        targetUrl += config.basePath;
+                        targetUrl += targetUrl.endsWith('/')?'':'/';
                     }
+                    targetUrl += config.authorizationEndpoint;
 
-                    var baseUrl = config.basePath + appendChar;
-                    var url = baseUrl + config.authorizationEndpoint
+                    let currentClaims = tokenService.allClaims();
+                    let idpClaimValue = currentClaims?currentClaims["idp"]:'';
+
+                    let url = targetUrl
                         + "?response_type="
                         + encodeURIComponent(config.responseType)
                         + "&client_id="
                         + encodeURIComponent(config.clientId)
                         + "&state="
-                        + encodeURIComponent(state || config.state)
+                        + encodeURIComponent(getState())
+                        + "&nonce="
+                        + encodeURIComponent(getNonce())
+                        + "&code_challenge="
+                        + encodeURIComponent(getHashedCodeChallenge())
+                        + "&code_challenge_method="
+                        + encodeURIComponent(getCodeChallengeMethod())
                         + "&redirect_uri="
                         + encodeURIComponent(config.redirectUri)
                         + "&scope="
-                        + encodeURIComponent(config.scope)
-                        + "&nonce="
-                        + encodeURIComponent(nonce);
+                        + encodeURIComponent(config.scope);
 
                     if (config.stickToLastKnownIdp && idpClaimValue) {
                         url = url + "&acr_values="
@@ -309,180 +435,250 @@
                     return url;
                 };
 
-                var createLogoutUrl = function (state) {
+                const createTokenEndpointUrl = function() {
+                    let targetUrl = '';
 
-                    var idToken = tokenService.getIdToken();
+                    if (!config.tokenEndpoint.startsWith('http://') && !config.tokenEndpoint.startsWith('https://')) {
+                        targetUrl += config.basePath;
+                        targetUrl += targetUrl.endsWith('/') ? '' : '/';
+                    }
+                    targetUrl += config.tokenEndpoint;
 
-                    var hasPathDelimiter = config.basePath.endsWith('/');
-                    var appendChar = (hasPathDelimiter) ? '' : '/';
+                    return targetUrl;
+                };
 
-                    var baseUrl = config.basePath + appendChar;
-                    return baseUrl + config.endSessionEndpoint
+                const createCodeExchangePayload = function(code){
+                    let code_challenge = getCodeChallenge();
+                    clearCodeChallenge();
+                    return {
+                        grant_type: 'authorization_code',
+                        client_id: config.clientId,
+                        redirect_uri: config.redirectUri,
+                        code: code,
+                        code_verifier: code_challenge
+                    };
+                };
+
+                const createTokenRefreshPayload = function(refresh_token){
+                    return {
+                        grant_type: 'refresh_token',
+                        client_id: config.clientId,
+                        refresh_token: refresh_token
+                    };
+                };
+
+                const createLogoutUrl = function () {
+                    clearState();
+
+                    let targetUrl = '';
+
+                    if (!config.endSessionEndpoint.startsWith('http://') && !config.endSessionEndpoint.startsWith('https://')) {
+                        targetUrl += config.basePath;
+                        targetUrl += targetUrl.endsWith('/')?'':'/';
+                    }
+                    targetUrl += config.endSessionEndpoint;
+
+                    let idToken = tokenService.getIdToken();
+
+                    return targetUrl + config.endSessionEndpoint
                         + "?id_token_hint="
                         + encodeURIComponent(idToken)
                         + "&post_logout_redirect_uri="
                         + encodeURIComponent(config.logoutUri)
                         + "&state="
-                        + encodeURIComponent(state || config.state)
+                        + encodeURIComponent(getState())
                         + "&r=" + Math.random();
                 };
 
-                var startImplicitFlow = function (localRedirect) {
-
-                    $localStorage['localRedirect'] = localRedirect;
-
-                    var url = createLoginUrl("dummynonce");
-                    window.location.replace(url);
+                const startCodeFlow = function (localRedirect) {
+                    clearCodeChallenge();
+                    clearNonce();
+                    clearState();
+                    setLocalRedirect(localRedirect);
+                    let url = createLoginUrl();
+                    $timeout(()=>window.location.replace(url));
                 };
 
-                var startLogout = function () {
-                    var url = createLogoutUrl();
-                    $localStorage['logoutActive'] = true;
-                    $localStorage['validateExpirityLoopRunning'] = false;
-                    $localStorage.$apply();
+                const startLogout = function () {
+                    let url = createLogoutUrl();
+                    setLogoutActiveFlag();
+                    clearExpiryLoopRunningFlag();
 
-                    $timeout(function() {
-                        window.location.replace(url);
-                    }, 100);
+                    $timeout(() => window.location.replace(url));
                 };
 
-                var handleImplicitFlowCallback = function (id_token) {
-                    tokenService.saveToken(id_token);
+                const handleCodeFlowCallback = function (id_token, refresh_token) {
+                    tokenService.saveTokens(id_token, refresh_token);
 
-                    var localRedirect = $localStorage['localRedirect'];
+                    let redirectTo, localRedirect = getLocalRedirect();
 
                     if (localRedirect) {
-                        var redirectTo = localRedirect.hash.substring(1);
-                        delete $localStorage['localRedirect'];
-                        $location.path(redirectTo);
+                        redirectTo = localRedirect.hash.substring(1);
+                        clearLocalRedirect();
                     }
                     else {
-                        $location.path('/');
+                        redirectTo = '/';
                     }
                     if (tokenService.hasValidToken()) {
-                        validateExpirityLoop();
+                        validateExpiryLoop();
                     }
-
                     $rootScope.$broadcast(loggedInEvent);
-                    console.log(loggedInEvent);
+                    logger.log(loggedInEvent);
+                    $timeout(()=>$location.path(redirectTo));
                     return true;
                 };
 
-                var handleSilentRefreshCallback = function (newIdToken) {
-                    var currentClaims = tokenService.allClaims();
-                    var event;
-                    var newClaims = tokenService.convertToClaims(newIdToken);
-                    var logHandler = console.log;
+                const handleSilentRefreshCallback = function (idToken, refreshToken) {
+                    let currentClaims = tokenService.allClaims();
+                    let event;
+                    let newClaims = tokenService.convertToClaims(idToken);
+                    let logHandler = logger.log;
 
                     if (!currentClaims || (currentClaims.exp && newClaims.exp && newClaims.exp > currentClaims.exp)) {
-                        tokenService.saveToken(newIdToken);
+                        tokenService.saveTokens(idToken, refreshToken);
                         event = silentRefreshSuceededEvent;
                     }
                     else {
                         event = silentRefreshFailedEvent;
-                        logHandler = console.error;
+                        logHandler = logger.error;
                     }
-                    $localStorage['refreshRunning'] = false;
-                    $localStorage.$apply();
+                    if (tokenService.hasValidToken()) {
+                        validateExpiryLoop();
+                    }
+                    clearRefreshRunningFlag();
                     $rootScope.$broadcast(event);
                     logHandler(event);
                 };
 
-                var trySilentRefresh = function () {
+                const trySilentRefresh = function () {
 
-                    if ($localStorage['refreshRunning']) {
+                    if (isRefreshRunningFlag()) {
+                        logger.info('Refreshing is running. Aborting...');
                         return;
                     }
+                    logger.log('Refreshing token...');
+                    setRefreshRunningFlag();
+                    $rootScope.$broadcast(silentRefreshStartedEvent);
+                    logger.log(silentRefreshStartedEvent);
 
-                    $localStorage['refreshRunning'] = true;
-                    $localStorage.$apply();
-
-                    $timeout(function () {
-                        $rootScope.$broadcast(silentRefreshStartedEvent);
-                        console.log(silentRefreshStartedEvent);
-
-                        var url = createLoginUrl('dummynonce', 'refresh');
-
-                        var html = "<iframe src='" + url + "' height='400' width='100%' id='oauthFrame' style='display:none;visibility:hidden;'></iframe>";
-                        var elem = angular.element(html);
-                        $document.find("body").append(elem);
-                        $timeout(function () {
-                            $localStorage.$sync();
-                            if ($localStorage['refreshRunning']) {
-                                delete $localStorage['refreshRunning'];
-                                $rootScope.$broadcast(silentRefreshTimeoutEvent);
-                                console.error(silentRefreshTimeoutEvent);
+                    let refresh_token = tokenService.getRefreshToken();
+                    $http.post(
+                        createTokenEndpointUrl(),
+                        $httpParamSerializer(createTokenRefreshPayload(refresh_token)),
+                        {
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded' // Note the appropriate header
                             }
-                            elem.remove();
-                            if (tokenService.hasValidToken()) {
-                                validateExpirityLoop();
-                            }
-                        }, 30000);
+                        }
+                    ).then((response)=> {
+                        let wrong_response = false;
+                        if (!response.data.hasOwnProperty('id_token')) {
+                            wrong_response = 'Code exchange response does NOT have "id_token"';
+                        }
+                        if (!response.data.hasOwnProperty('refresh_token')) {
+                            wrong_response = 'Code exchange response does NOT have "refresh_token"';
+                        }
+                        if (wrong_response) {
+                            logger.error(wrong_response, response.data);
+                            $rootScope.$broadcast(silentRefreshFailedEvent);
+                            clearRefreshRunningFlag();
+                            return
+                        }
+                        handleSilentRefreshCallback(response.data.id_token, response.data.refresh_token)
+                    }, (response)=> {
+                        logger.error('Unable to perform silent Refresh', response.statusText, response.data);
+                        $rootScope.$broadcast(silentRefreshFailedEvent);
+                        clearRefreshRunningFlag();
                     });
 
                 };
 
+                const exchangeCodeForTokens = function(code) {
+                    logger.info('Exchanging "code" for refresh token');
 
-                var handleSignInCallback = function (data) {
-
-                    if (!data && window.location.hash.indexOf("#") === 0) {
-                        data = window.location.hash.substr(16)
-                    }
-
-                    var fragments = {};
-                    if (data) {
-                        fragments = parseQueryString(data);
-                    }
-                    else {
-                        throw Error("Unable to process callback. No data given!");
-                    }
-
-                    console.debug("oidc-angular: Processing callback information", data);
-
-                    var id_token = fragments['id_token'];
-                    var state = fragments['state'];
-
-                    if (id_token) {
-                        if (state === 'refresh') {
-                            handleSilentRefreshCallback(id_token);
+                    $http.post(
+                        createTokenEndpointUrl(),
+                        $httpParamSerializer(createCodeExchangePayload(code)),
+                        {
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded' // Note the appropriate header
+                            }
                         }
-                        else {
-                            handleImplicitFlowCallback(id_token);
+                    ).then((response)=>{
+                        let wrong_response = false;
+                        if (!response.data.hasOwnProperty('id_token')) {
+                            wrong_response = 'Code exchange response does NOT have "id_token"';
                         }
-                    }
+                        if (!response.data.hasOwnProperty('refresh_token')) {
+                            wrong_response = 'Code exchange response does NOT have "refresh_token"';
+                        }
+                        if (wrong_response) {
+                            logger.error(wrong_response, response.data);
+                            throw new Error(wrong_response);
+                        }
+                        handleCodeFlowCallback(response.data.id_token, response.data.refresh_token);
+                    }, (response) => {
+                        let msg = 'Unable to exchange code for token!';
+                        logger.error(msg, response.statusText, response);
+                        throw new Error(msg);
+                    })
                 };
 
-                var handleSignOutCallback = function () {
 
-                    delete $localStorage['logoutActive'];
-                    delete $localStorage['validateExpirityLoopRunning'];
+                const handleSignInCallback = function (data) {
+
+                    logger.debug("Processing callback information", data);
+                    if (!data.code && !data.state){
+                        // workaround for bug https://github.com/angular/angular.js/issues/6172
+                        const absUrl = $location.absUrl();
+                        const start = absUrl.indexOf('?')+1;
+                        const end = absUrl.indexOf('#');
+                        const queryParams = absUrl.substr(start, end-start);
+                        data = parseQueryString(queryParams);
+                    }
+
+                    const code = data.code;
+                    const state = data.state;
+
+                    if (getState() != state) {
+                        let msg = 'Wrong STATE. CSRF detected.';
+                        logger.error(msg, getState(), state);
+                        throw new Error(msg);
+                    }
+
+                    exchangeCodeForTokens(code);
+                };
+
+                const handleSignOutCallback = function () {
+                    clearLogoutActiveFlag();
+                    clearExpiryLoopRunningFlag();
 
                     tokenService.clearTokens();
-                    $localStorage.$apply();
-                    $location.path('/');
 
                     $rootScope.$broadcast(loggedOutEvent);
-                    console.log(loggedOutEvent);
+                    logger.log(loggedOutEvent);
+
+                    $timeout(()=>{$location.path('/')});
                 };
 
-                var tokenIsValidAt = function (date) {
-                    var claims = tokenService.allClaims();
+                const tokenIsValidAt = function (date) {
+                    let claims = tokenService.allClaims();
 
                     if (!claims || !(claims.hasOwnProperty('exp'))) {
                         return false;
                     }
 
-                    var expiresAtMSec = claims.exp * 1000;
+                    let expiresAtMSec = claims.exp * 1000;
 
                     return date <= expiresAtMSec;
                 };
 
-                var validateExpirity = function () {
-                    var now = Date.now();
+                const validateExpirity = function () {
+                    let now = Date.now();
 
-                    if (!tokenService.hasValidToken() || !tokenIsValidAt(now + config.advanceRefresh*1000)) {
+                    if (!tokenService.hasValidToken() || !tokenIsValidAt(now + config.advanceRefresh * 1000)) {
                         $rootScope.$broadcast(tokenExpiresSoonEvent);
-                        console.warn(tokenExpiresSoonEvent);
+                        logger.warn(tokenExpiresSoonEvent);
                         trySilentRefresh();
                     }
                 };
@@ -508,7 +704,7 @@
                     },
 
                     signIn: function (localRedirect) {
-                        startImplicitFlow(localRedirect);
+                        startCodeFlow(localRedirect);
                     },
 
                     signOut: function () {
@@ -525,8 +721,61 @@
     }]);
 
     /* Helpers & Polyfills */
+
+    function arrayBufferToBase64(ab){
+
+        let dView = new Uint8Array(ab);   //Get a byte view
+
+        let arr = Array.prototype.slice.call(dView); //Create a normal array
+
+        let arr1 = arr.map(function(item){
+            return String.fromCharCode(item);    //Convert
+        });
+
+        return window.btoa(arr1.join(''));   //Form a string
+
+    }
+
+
+    if (!String.prototype.endsWith) {
+        String.prototype.endsWith = function (searchString, position) {
+            let subjectString = this.toString();
+            if (position === undefined || position > subjectString.length) {
+                position = subjectString.length;
+            }
+            position -= searchString.length;
+            let lastIndex = subjectString.indexOf(searchString, position);
+            return lastIndex !== -1 && lastIndex === position;
+        };
+    }
+
+    if (!String.prototype.startsWith) {
+        String.prototype.startsWith = function (searchString, position) {
+            position = position || 0;
+            return this.lastIndexOf(searchString, position) === position;
+        };
+    }
+
+    function dec2hex (dec) {
+        return ('0' + dec.toString(16)).substr(-2)
+    }
+
+    function arrayBufferToBase64(ab){
+
+        let dView = new Uint8Array(ab);   //Get a byte view
+
+        let arr = Array.prototype.slice.call(dView); //Create a normal array
+
+        let arr1 = arr.map(function(item){
+            return String.fromCharCode(item);    //Convert
+        });
+
+        return window.btoa(arr1.join(''));   //Form a string
+
+    }
+
     function parseQueryString(queryString) {
-        var data = {}, pairs, pair, separatorIndex, escapedKey, escapedValue, key, value;
+        let data = {}, pairs, pair, separatorIndex, escapedKey, escapedValue, key, value;
 
         if (queryString === null) {
             return data;
@@ -534,7 +783,7 @@
 
         pairs = queryString.split("&");
 
-        for (var i = 0; i < pairs.length; i++) {
+        for (let i = 0; i < pairs.length; i++) {
             pair = pairs[i];
             separatorIndex = pair.indexOf("=");
 
@@ -557,25 +806,4 @@
 
         return data;
     }
-
-
-    if (!String.prototype.endsWith) {
-        String.prototype.endsWith = function (searchString, position) {
-            var subjectString = this.toString();
-            if (position === undefined || position > subjectString.length) {
-                position = subjectString.length;
-            }
-            position -= searchString.length;
-            var lastIndex = subjectString.indexOf(searchString, position);
-            return lastIndex !== -1 && lastIndex === position;
-        };
-    }
-
-    if (!String.prototype.startsWith) {
-        String.prototype.startsWith = function (searchString, position) {
-            position = position || 0;
-            return this.lastIndexOf(searchString, position) === position;
-        };
-    }
-
 })();
