@@ -40,7 +40,7 @@
     };
 
     // Module registrarion
-    let oidcmodule = angular.module('oidc-angular', ['base64', 'ngStorage', 'ui.router', 'angular-encryption']);
+    let oidcmodule = angular.module('oidc-angular', ['base64', 'ngStorage', 'ui.router']);
 
     oidcmodule.config(['$httpProvider', '$stateProvider', function ($httpProvider, $stateProvider) {
         $httpProvider.interceptors.push('oidcHttpInterceptor');
@@ -302,8 +302,8 @@
             },
 
             // Service itself
-            $get: ['$http', '$timeout', '$rootScope', '$localStorage', '$location', 'tokenService', 'sha256', '$httpParamSerializer', '$base64', function (
-                    $http,   $timeout,   $rootScope,   $localStorage,   $location,   tokenService,   sha256,   $httpParamSerializer,   $base64) {
+            $get: ['$http', '$timeout', '$rootScope', '$localStorage', '$location', 'tokenService', '$httpParamSerializer', function (
+                    $http,   $timeout,   $rootScope,   $localStorage,   $location,   tokenService,   $httpParamSerializer   ) {
 
                 const setLogoutActiveFlag = () => $localStorage[STORAGE_KEYS.logoutActive] = true;
                 const clearLogoutActiveFlag = () => delete $localStorage[STORAGE_KEYS.logoutActive];
