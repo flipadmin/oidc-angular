@@ -1,57 +1,123 @@
 <html>
-    
+
     <head>
-    
-        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.4.9/angular.js"></script>
-        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.4.9/angular-route.js"></script>
-        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/ngStorage/0.3.10/ngStorage.js"></script>
-        <script type="text/javascript" src="../oidc-angular.js"></script>
+
+        <script type="text/javascript" src="angular.js"></script>
+        <script type="text/javascript" src="angular-ui-router.js"></script>
+        <script type="text/javascript" src="ngStorage.js"></script>
         <script type="text/javascript" src="angular-base64.js"></script>
+        <script type="text/javascript" src="angualar-sha256.js"></script>
+        <script type="text/javascript" src="oidc-angular.js"></script>
     </head>
-    
+
     <body ng-app="app" ng-controller="ApplicationController as vm">
-        
+
         <button ng-click="vm.login()">Login</button>
         <button ng-click="vm.clear()">Clear Local Storage</button>
-        
-        <div ng-view> </div>
-        
+        <button ng-click="vm.status()">Status</button>
+        <button ng-click="vm.validateExpirity()">ValidateExpirity</button>
+        <button ng-click="vm.logout()">Logout</button>
+        <button ng-click="vm.password_login()">Password Login</button>
+
+        <ui-view></ui-view>
+
+
+        <pre>
+          <!-- Here's some values to keep an eye on in the sample in order to understand $state and $stateParams -->
+          $state = "{{$state.current.name}}"
+          $stateParams = "{{$stateParams}}"
+          $state full url = "{{ $state.$current.url.source }}"
+                <!-- $state.$current is not a public api, we are using it to
+                     display the full url for learning purposes-->
+        </pre>
+
         <script>
-            
-            var appModule = angular.module('app', ['oidc-angular']);
-            
-            appModule.config(['$authProvider', function($authProvider) {
-                
+
+            let appModule = angular.module('app', ['ngStorage', 'oidc-angular']);
+
+            appModule.config(['$authProvider', '$urlRouterProvider', '$stateProvider', function($authProvider, $urlRouterProvider, $stateProvider) {
+                $urlRouterProvider.otherwise('/');
+                $stateProvider
+                    .state('home', {
+                        url: '/'
+                    });
                 $authProvider.configure({
-                    basePath:               'http://demo-server.openidconnect.info',
-                    authorizationEndpoint : 'authorize',
-                    clientId:               '36e9e4b62933f528aa1edd9836cfe7776d7c401d1d52935157a0a5d133cbee0a'
+                    authorizationEndpoint: 'http://localhost:10000/index.html',
+                    tokenEndpoint:         'http://localhost:8080/openid/token',
+                    endSessionEndpoint:    'http://localhost:10000/end_session.html',
+                    redirectUri:           'http://localhost:8100/#/auth/callback/',
+                    logoutUri:             'http://localhost:8100/#/auth/clear/',
+                    clientId:              '347093',
+                    advanceRefresh:         10,
+                    apiUrl:                 '^http:\/\/localhost:8080\/(?!openid).+'
                 })
             }]);
-            
-            appModule.controller('ApplicationController', ['$auth', '$rootScope', '$localStorage', 
-            function($auth, $rootScope, $localStorage) {
-                
-                var vm = this;
-                
+
+            appModule.controller('ApplicationController', ['$auth', '$rootScope', '$localStorage', '$state', '$stateParams',
+            function($auth, $rootScope, $localStorage, $state, $stateParams) {
+
+                let vm = this;
+
                 console.log('[ControllerCtor]', '$auth.isAuthenticated', $auth.isAuthenticated());
-                
+
                 $rootScope.$on('oidcauth:loggedIn', function(e) {
-                    console.log('[EventCallback]', 'Event', e.name, e);
-                    console.log('[EventCallback]', '$auth.isAuthenticated', $auth.isAuthenticated());
+                    console.log('[EventCallback-loggedIn]', 'Event', e.name, e);
                 });
 
+                $rootScope.$on('oidcauth:silentRefreshStarted', function(e) {
+                    console.log('[EventCallback-silentRefreshStarted]', 'Event', e.name, e);
+                });
+
+                $rootScope.$on('oidcauth:silentRefreshSucceded', function(e) {
+                    console.log('[EventCallback-silentRefreshSucceded]', 'Event', e.name, e);
+                });
+
+                $rootScope.$on('oidcauth:silentRefreshFailed', function(e) {
+                    console.log('[EventCallback-silentRefreshFailed]', 'Event', e.name, e);
+                });
+
+                $rootScope.$on('oidcauth:silentRefreshTimeout', function(e) {
+                    console.log('[EventCallback-silentRefreshTimeout]', 'Event', e.name, e);
+                });
+
+                $rootScope.$on('oidcauth:tokenExpires', function(e) {
+                    console.log('[EventCallback-tokenExpires]', 'Event', e.name, e);
+                });
 
                 vm.login = function() {
                     $auth.signIn();
-                }
-                
+                };
+
+                vm.logout = function() {
+                    $auth.signOut();
+                };
+
                 vm.clear = function() {
                     $localStorage.$reset();
+                };
+
+                vm.status = function() {
+                  console.log('[WM-STATUS]', '$auth.isAuthenticated', $auth.isAuthenticated());
+                };
+
+                vm.validateExpirity = function() {
+                  $auth.validateExpirity();
+                };
+                $rootScope.$state = $state;
+                $rootScope.$stateParams = $stateParams;
+
+                vm.password_login = function() {
+                    const username = prompt('Username');
+                    const password = prompt('Password');
+                    $auth.signInWithCredentials(username, password).then(function(result){
+                        console.log('success login', result);
+                    }, function(result){
+                        console.error('Unable to login', result);
+                    });
                 }
             }]);
-            
 
-        </script>        
+
+        </script>
     </body>
 </html>
