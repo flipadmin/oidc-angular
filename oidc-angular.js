@@ -302,8 +302,8 @@
             },
 
             // Service itself
-            $get: ['$http', '$timeout', '$rootScope', '$localStorage', '$location', 'tokenService', '$httpParamSerializer', function (
-                    $http,   $timeout,   $rootScope,   $localStorage,   $location,   tokenService,   $httpParamSerializer   ) {
+            $get: ['$http', '$timeout', '$rootScope', '$localStorage', '$location', 'tokenService', '$httpParamSerializer', '$q', function (
+                    $http,   $timeout,   $rootScope,   $localStorage,   $location,   tokenService,   $httpParamSerializer,   $q   ) {
 
                 const setLogoutActiveFlag = () => $localStorage[STORAGE_KEYS.logoutActive] = true;
                 const clearLogoutActiveFlag = () => delete $localStorage[STORAGE_KEYS.logoutActive];
@@ -467,6 +467,22 @@
                     };
                 };
 
+                /**
+                 * Return dictionary used for Password Authentication Flow
+                 * 
+                 * @param {String} username 
+                 * @param {String} password 
+                 * @returns {Object} dictionary used for Password Authentication Flow
+                 */
+                const createPasswordExchangePayload = function(username, password){
+                    return {
+                        grant_type: 'password',
+                        client_id: config.clientId,
+                        username: username,
+                        password: password
+                    };
+                };
+
                 const createLogoutUrl = function () {
                     clearState();
 
@@ -507,7 +523,15 @@
                     $timeout(() => window.location.replace(url));
                 };
 
-                const handleCodeFlowCallback = function (id_token, refresh_token) {
+                /**
+                 * Process success response from Token EndPoint
+                 * 
+                 * @param {Oidc.TokenEndpoint.Response} token_endpoint_response See: {@link Oidc.TokenEndpoint.Response}
+                 */
+                const handleTokenEndpointResponse = function (token_endpoint_response) {
+                    const id_token = token_endpoint_response.id_token;
+                    const refresh_token = token_endpoint_response.refresh_token;
+
                     tokenService.saveTokens(id_token, refresh_token);
 
                     let redirectTo, localRedirect = getLocalRedirect();
@@ -593,6 +617,36 @@
 
                 };
 
+                /**
+                 * Token Endpoint response object
+                 * @typedef {Object} Oidc.TokenEndpoint.Response
+                 * @property {String} access_token OAuth2's Access Token
+                 * @property {String} refresh_token OAuth2's Refresh Token
+                 * @property {String} token_type Authentication Token's Type - default 'bearer'
+                 * @property {String} expires_in OAuth2'a Access Token expiration time in seconds
+                 * @property {String} id_token OpenID Connect JWT Token
+                 */
+
+                /**
+                 * Validates response from Token Endpoint
+                 * 
+                 * @param {Object} response XHR object
+                 * @param {Oidc.TokenEndpoint.Response} response.data See: {@link Oidc.TokenEndpoint.Response}
+                 */
+                const validateTokenEndPoint = function(response){
+                    let wrong_response = false;
+                    if (!response.data.hasOwnProperty('id_token')) {
+                        wrong_response = 'Code exchange response does NOT have "id_token"';
+                    }
+                    if (!response.data.hasOwnProperty('refresh_token')) {
+                        wrong_response = 'Code exchange response does NOT have "refresh_token"';
+                    }
+                    if (wrong_response) {
+                        logger.error(wrong_response, response.data);
+                        throw new Error(wrong_response);
+                    }
+                }
+
                 const exchangeCodeForTokens = function(code) {
                     logger.info('Exchanging "code" for refresh token');
 
@@ -605,18 +659,8 @@
                             }
                         }
                     ).then((response)=>{
-                        let wrong_response = false;
-                        if (!response.data.hasOwnProperty('id_token')) {
-                            wrong_response = 'Code exchange response does NOT have "id_token"';
-                        }
-                        if (!response.data.hasOwnProperty('refresh_token')) {
-                            wrong_response = 'Code exchange response does NOT have "refresh_token"';
-                        }
-                        if (wrong_response) {
-                            logger.error(wrong_response, response.data);
-                            throw new Error(wrong_response);
-                        }
-                        handleCodeFlowCallback(response.data.id_token, response.data.refresh_token);
+                        validateTokenEndPoint(response);
+                        handleTokenEndpointResponse(response.data);
                     }, (response) => {
                         let msg = 'Unable to exchange code for token!';
                         logger.error(msg, response.statusText, response);
@@ -683,6 +727,35 @@
                     }
                 };
 
+                /**
+                 * Function used to invoke OAuth2 Password based authentication flow. OIDC client must be set as public.
+                 * 
+                 * @param {string} username 
+                 * @param {string} password 
+                 * @returns {Promise} Promise object as a result of authentication
+                 */
+                const doLogin = function (username, password) {
+                    return $q((resolve, reject)=>{
+                        $http.post(
+                            createTokenEndpointUrl(),
+                            $httpParamSerializer(createPasswordExchangePayload(username, password)),
+                            {
+                                headers: {
+                                    'Content-Type': 'application/x-www-form-urlencoded' // Note the appropriate header
+                                }
+                            }
+                        ).then((response)=>{
+                            validateTokenEndPoint(response);
+                            handleTokenEndpointResponse(response.data);
+                            return resolve();
+                        }, (response)=>{
+                            const msg = 'Unable to authenticate user.'
+                            logger.error(msg, response.statusText, response);
+                            return reject(response.data);
+                        });
+                    })
+                }
+
                 init();
 
                 //noinspection JSUnusedGlobalSymbols
@@ -706,6 +779,8 @@
                     signIn: function (localRedirect) {
                         startCodeFlow(localRedirect);
                     },
+
+                    signInWithCredentials: doLogin,
 
                     signOut: function () {
                         startLogout();
