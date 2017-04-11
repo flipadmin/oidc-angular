@@ -3,13 +3,11 @@
     <form novalidate class="simple-form">
       <label>Username: <input type="text" ng-model="user.username" /></label><br>
       <label>Password: <input type="password" ng-model="user.password" /></label><br>
-      <input type="button" ng-click="reset()" value="Reset" />
-      <input type="submit" ng-click="update(user)" value="Save" />
+      <input type="submit" ng-click="vm.login(user)" value="Login" />
     </form>
-    <pre>
-      isAuthenticated = {{vm.isAuthed()}}
-      ---------------
-      {{vm.loging_status}}
-    </pre>
+    <pre style="border: 1px solid #999; background-color: #eee; margin: 20px 40px;">isAuthenticated = {{vm.isAuthed()}}</pre>
+    <pre style="border: 1px solid #999; background-color: #eee; margin: 20px 40px;">{{user|json}}</pre>
+    <pre style="border: 1px solid #999; background-color: #eee; margin: 20px 40px;">{{vm.loging_status}}</pre>
+    <button ng-click="vm.logout()">logout</button>
   </ion-content>
 </ion-view>

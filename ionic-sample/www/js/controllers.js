@@ -3,16 +3,16 @@ angular.module('starter.controllers', [])
   .controller('DashCtrl', function ($scope, $auth) {
     var vm = this;
     vm.loading = true;
-    vm.loging_status = '';
+    vm.loging_status = 'loging_status';
     vm.logout = function () {
       $auth.signOut();
     }
 
     vm.login = function (user) {
       vm.loging_status = 'Starting request';
-      $auth.signInWithCredentials(user.username, user.password).then(()=>{
+      $auth.signInWithCredentials(user.username, user.password).then(function(){
         vm.loging_status = 'Logged in..';
-      }, (result)=>{
+      }, function(result){
         vm.loging_status = JSON.stringify(result);
       });
     }
