@@ -1,1 +1,1 @@
-/Users/wojtekbartosiak/PycharmProjects/oidc-angular/oidc-angular.js
+../../../../oidc-angular.js
